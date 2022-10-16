@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mkdocs.config import base
 from mkdocs.config import config_options as c
+from mkdocs.structure.files import AssetVersioning
 
 
 def get_schema() -> base.PlainConfigSchema:
@@ -87,6 +88,9 @@ class MkDocsConfig(base.Config):
     extra_javascript = c.Type(list, default=[])
     """Specify which css or javascript files from the docs directory should be
     additionally included in the site."""
+
+    asset_versioning = c.EnumChoice(AssetVersioning, default=AssetVersioning.hash_rename)
+    asset_patterns = c.ListOfItems(c.Type(str), default=['*.css', '*.js'])
 
     extra_templates = c.Type(list, default=[])
     """Similar to the above, but each template (HTML or XML) will be build with

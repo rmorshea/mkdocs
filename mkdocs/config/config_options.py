@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import functools
 import ipaddress
 import os
@@ -23,6 +24,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 from urllib.parse import quote as urlquote
@@ -42,6 +44,7 @@ from mkdocs.exceptions import ConfigurationError
 
 T = TypeVar('T')
 SomeConfig = TypeVar('SomeConfig', bound=Config)
+SomeEnum = TypeVar('SomeEnum', bound=enum.Enum)
 
 
 class SubConfig(Generic[SomeConfig], BaseConfigOption[SomeConfig]):
@@ -282,6 +285,19 @@ class Choice(Generic[T], OptionallyRequired[T]):
         if value not in self.choices:
             raise ValidationError(f"Expected one of: {self.choices} but received: {value!r}")
         return value  # type: ignore
+
+
+class EnumChoice(Generic[SomeEnum], Choice[SomeEnum]):
+    def __init__(self, enum_type: t.Type[SomeEnum], default: t.Optional[SomeEnum] = None) -> None:
+        self.enum_type = enum_type
+        super().__init__(
+            [it.value for it in enum_type],
+            default=default.value if default is not None else None,
+        )
+
+    def run_validation(self, value: object) -> SomeEnum:
+        string_value = Choice.run_validation(cast(Choice, self), value)
+        return self.enum_type[string_value]
 
 
 class Deprecated(BaseConfigOption):
