@@ -5,11 +5,15 @@ import logging
 import os
 import posixpath
 import shutil
+import warnings
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Any, Iterable, Iterator, Mapping, Sequence
 from urllib.parse import quote as urlquote
 
 import jinja2.environment
+import pathspec
+import pathspec.gitignore
+import pathspec.util
 
 from mkdocs import utils
 
@@ -208,6 +212,14 @@ class File:
             f" name='{self.name}', url='{self.url}')"
         )
 
+    def sort_key(self):
+        """To be used as the `key` for `sort` functions. Defines the default order of files."""
+        parts = self.src_uri.split('/')
+        last_index = len(parts) - 1
+        return tuple(
+            chr(self.name != "index" if i == last_index else 2) + p for i, p in enumerate(parts)
+        )
+
     def _get_stem(self) -> str:
         """Return the name of the file without its extension."""
         filename = posixpath.basename(self.src_uri)
@@ -276,41 +288,45 @@ class File:
         return self.src_uri.endswith('.css')
 
 
-def get_files(config: MkDocsConfig | Mapping[str, Any]) -> Files:
+def _match_files_negated(exclude: pathspec.PathSpec, root: str) -> Iterable[str]:
+    for path in pathspec.util.iter_tree_files(root):
+        if not exclude.match_file(path):
+            yield path
+
+
+def get_files(
+    config: MkDocsConfig | Mapping[str, Any],
+    *,
+    default_exclude=pathspec.gitignore.GitIgnoreSpec.from_lines(['.*', '/templates/']),
+) -> Files:
     """Walk the `docs_dir` and return a Files collection."""
-    files = []
-    exclude = ['.*', '/templates']
+    exclude = config.get('exclude_docs')
+    if exclude:
+        exclude = default_exclude + exclude
+    else:
+        exclude = default_exclude
+    files = [
+        File(path, config['docs_dir'], config['site_dir'], config['use_directory_urls'])
+        for path in _match_files_negated(exclude, root=config['docs_dir'])
+    ]
+    files.sort(key=File.sort_key)
 
-    for source_dir, dirnames, filenames in os.walk(config['docs_dir'], followlinks=True):
-        relative_dir = os.path.relpath(source_dir, config['docs_dir'])
-
-        for dirname in list(dirnames):
-            path = os.path.normpath(os.path.join(relative_dir, dirname))
-            # Skip any excluded directories
-            if _filter_paths(basename=dirname, path=path, is_dir=True, exclude=exclude):
-                dirnames.remove(dirname)
-        dirnames.sort()
-
-        for filename in _sort_files(filenames):
-            path = os.path.normpath(os.path.join(relative_dir, filename))
-            # Skip any excluded files
-            if _filter_paths(basename=filename, path=path, is_dir=False, exclude=exclude):
-                continue
+    for i in reversed(range(len(files) - 1)):
+        if files[i].dest_uri == files[i + 1].dest_uri:
             # Skip README.md if an index file also exists in dir
-            if filename == 'README.md' and 'index.md' in filenames:
-                log.warning(
-                    f"Both index.md and README.md found. Skipping README.md from {source_dir}"
-                )
-                continue
-            files.append(
-                File(path, config['docs_dir'], config['site_dir'], config['use_directory_urls'])
+            log.warning(
+                f"Excluding '{files[i].src_uri}' from the site because "
+                f"it conflicts with '{files[i + 1].src_uri}'."
             )
+            del files[i]
 
     return Files(files)
 
 
 def _sort_files(filenames: Iterable[str]) -> list[str]:
-    """Always sort `index` or `README` as first filename in list."""
+    warnings.warn(
+        "_sort_files is not used since MkDocs 1.5 and will be removed soon.", DeprecationWarning
+    )
 
     def key(f):
         if os.path.splitext(f)[0] in ['index', 'README']:
@@ -322,6 +338,9 @@ def _sort_files(filenames: Iterable[str]) -> list[str]:
 
 def _filter_paths(basename: str, path: str, is_dir: bool, exclude: Iterable[str]) -> bool:
     """.gitignore style file filtering."""
+    warnings.warn(
+        "_filter_paths is not used since MkDocs 1.5 and will be removed soon.", DeprecationWarning
+    )
     for item in exclude:
         # Items ending in '/' apply only to directories.
         if item.endswith('/') and not is_dir:
